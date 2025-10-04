@@ -7,7 +7,7 @@ import os
 from config import TOKEN, CHECK_INTERVAL, DATA_FILE
 
 intents = discord.Intents.default()
-intents.messages = True
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Load saved data
@@ -33,7 +33,7 @@ def get_price(url):
         price_fraction = soup.find("span", {"class": "a-price-fraction"})
 
         if price_whole and price_fraction:
-            price_str = price_whole.text.replace(",", "").strip() + "." + price_fraction.text.strip()
+            price_str = price_whole.text.replace(",", "").replace(".", "").strip() + "." + price_fraction.text.strip()
             return float(price_str)
     except Exception as e:
         print(f"Error fetching {url}: {e}")
@@ -56,7 +56,7 @@ async def track(ctx, action: str, url: str = None):
             await ctx.send("You are not tracking any items.")
         else:
             msg = "\n".join([item["url"] for item in tracked_items[user_id]])
-            await ctx.send(f"🔍 You are tracking:\n{msg}")
+            await ctx.send(f"📋 You are tracking:\n{msg}")
 
     elif action == "remove" and url:
         if user_id in tracked_items:
@@ -78,24 +78,32 @@ async def track(ctx, action: str, url: str = None):
 @tasks.loop(minutes=CHECK_INTERVAL)
 async def check_prices():
     for user_id, items in tracked_items.items():
-        user = await bot.fetch_user(int(user_id))
-        for item in items:
-            url = item["url"]
-            price = get_price(url)
-            if price is None:
-                continue
-            if item["last_price"] is None:
-                item["last_price"] = price
-                save_data()
-                continue
-            if price < item["last_price"]:
-                item["last_price"] = price
-                save_data()
-                await user.send(f"📉 Price drop detected!\n{url}\nNow: ${price:.2f}")
+        try:
+            user = await bot.fetch_user(int(user_id))
+            for item in items:
+                url = item["url"]
+                price = get_price(url)
+                if price is None:
+                    continue
+                if item["last_price"] is None:
+                    item["last_price"] = price
+                    save_data()
+                    continue
+                if price < item["last_price"]:
+                    item["last_price"] = price
+                    save_data()
+                    await user.send(f"📉 Price drop detected!\n{url}\nNow: ${price:.2f}")
+        except Exception as e:
+            print(f"Error checking prices for user {user_id}: {e}")
 
 @bot.event
 async def on_ready():
     print(f"✅ Bot logged in as {bot.user}")
-    check_prices.start()
+    if not check_prices.is_running():
+        check_prices.start()
 
-bot.run(TOKEN)
+if TOKEN is None:
+    print("❌ ERROR: DISCORD_BOT_TOKEN not found in environment variables!")
+    print("Please set your bot token in the environment or .env file")
+else:
+    bot.run(TOKEN)
